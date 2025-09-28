@@ -3,7 +3,7 @@
 
 const CONFIG = {
   // OpenAI API Configuration
-  OPENAI_API_KEY: 'YOUR_API_KEY_HERE',
+  OPENAI_API_KEY: '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',
   
   // API Settings
   OPENAI_MODEL: 'gpt-4',

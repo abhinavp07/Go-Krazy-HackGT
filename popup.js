@@ -11,14 +11,15 @@
   const readPageBtn = document.getElementById('readPage');
   const readSelectedBtn = document.getElementById('readSelected');
   const readCopiedBtn = document.getElementById('readCopied');
-  const readFileBtn = document.getElementById('readFile');
-  const fileInputContainer = document.getElementById('fileInputContainer');
-  const fileInput = document.getElementById('fileInput');
-  const analyzeFileBtn = document.getElementById('analyzeFile');
   const loading = document.getElementById('loading');
   const results = document.getElementById('results');
   const error = document.getElementById('error');
   const errorMessage = document.getElementById('errorMessage');
+  
+  // Contract rating elements
+  const contractRatingDiv = document.getElementById('contractRating');
+  const ratingScoreMain = document.getElementById('ratingScoreMain');
+  const ratingDescriptionMain = document.getElementById('ratingDescriptionMain');
   
   // API status elements
   const statusIndicator = document.getElementById('statusIndicator');
@@ -28,8 +29,7 @@
   readPageBtn.addEventListener('click', () => readPageText());
   readSelectedBtn.addEventListener('click', () => readSelectedText());
   readCopiedBtn.addEventListener('click', () => readCopiedText());
-  readFileBtn.addEventListener('click', () => toggleFileInput());
-  analyzeFileBtn.addEventListener('click', () => analyzeFile());
+  
   
   // Initialize API status on load
   initializeApiStatus();
@@ -78,8 +78,23 @@
     });
   }
 
+  // Function to jump to red flag in document
+  function jumpToRedFlag(term, context) {
+    // Try to find and scroll to the red flag term in the current tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.sendMessage(tabs[0].id, { 
+        action: 'jumpToRedFlag', 
+        term: term,
+        context: context
+      });
+    });
+  }
+
   // Make jumpToSection globally available
   window.jumpToSection = jumpToSection;
+  
+  // Make jumpToRedFlag globally available
+  window.jumpToRedFlag = jumpToRedFlag;
   
   // Function to add event listeners for section links
   function addSectionLinkListeners() {
@@ -91,6 +106,37 @@
         jumpToSection(sectionNumber);
       }
     });
+  }
+
+  // Function to add event listeners for collapsible section headers
+  function addSectionHeaderListeners() {
+    const summaryContainer = document.getElementById('summary');
+    summaryContainer.addEventListener('click', function(event) {
+      if (event.target.classList.contains('section-header') || event.target.closest('.section-header')) {
+        const header = event.target.classList.contains('section-header') ? 
+          event.target : event.target.closest('.section-header');
+        const contentId = header.getAttribute('data-target');
+        toggleSectionCollapsible(contentId, header);
+      }
+    });
+  }
+
+  // Function to toggle section collapsible
+  function toggleSectionCollapsible(contentId, header) {
+    const content = document.getElementById(contentId);
+    const icon = header.querySelector('.collapse-icon');
+    
+    if (content.classList.contains('collapsed')) {
+      // Expand
+      content.classList.remove('collapsed');
+      header.classList.add('expanded');
+      icon.textContent = '▲';
+    } else {
+      // Collapse
+      content.classList.add('collapsed');
+      header.classList.remove('expanded');
+      icon.textContent = '▼';
+    }
   }
 
   // API Status Management Functions
@@ -181,48 +227,6 @@
     }
   }
 
-  // Function to toggle file input
-  function toggleFileInput() {
-    fileInputContainer.style.display = fileInputContainer.style.display === 'none' ? 'block' : 'none';
-  }
-
-  // Function to analyze uploaded file
-  async function analyzeFile() {
-    const file = fileInput.files[0];
-    if (!file) {
-      showError('Please select a file first.');
-      return;
-    }
-
-    showLoading();
-    
-    try {
-      const text = await readFileContent(file);
-      const documentData = {
-        text: text,
-        documentType: detectDocumentType(text),
-        redFlags: highlightImportantTerms(text),
-        url: file.name,
-        title: file.name
-      };
-      
-      currentDocumentData = documentData;
-      await analyzeDocument(documentData);
-    } catch (err) {
-      showError('Error reading file. Please try a different file.');
-    }
-  }
-
-  // Function to read file content
-  function readFileContent(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = reject;
-      reader.readAsText(file);
-    });
-  }
-
   // Function to analyze document
   async function analyzeDocument(documentData) {
     try {
@@ -240,15 +244,18 @@
     // Try OpenAI analysis first, fallback to local analysis
     if (openaiApiKey) {
       try {
-        return await performOpenAIAnalysis(text, documentType);
+        const analysis = await performOpenAIAnalysis(text, documentType);
+        analysis.contractRating = calculateContractRating(text, redFlags, documentType);
+        return analysis;
       } catch (err) {
         console.log('OpenAI analysis failed, falling back to local analysis:', err);
-        updateApiStatus('error', 'API analysis failed, using local analysis');
       }
     }
     
     // Fallback to local analysis
-    return await performLocalAnalysis(documentData);
+    const analysis = await performLocalAnalysis(documentData);
+    analysis.contractRating = calculateContractRating(text, redFlags, documentType);
+    return analysis;
   }
 
   // OpenAI-powered analysis
@@ -512,20 +519,29 @@ Make the language simple and accessible for non-lawyers.`;
               !sectionContent.match(/^\d+$/) &&
               sectionNumber <= 20) { // Reasonable section number limit
             
-            // Get content for this section (next few lines)
+            // Get content for this section (collect more content)
             let sectionText = sectionContent;
-            for (let i = index + 1; i < Math.min(index + 5, lines.length); i++) {
+            let contentLines = 0;
+            
+            // Collect content until we hit another section or run out of lines
+            for (let i = index + 1; i < lines.length && contentLines < 15; i++) {
               const nextLine = lines[i];
-              if (nextLine.length > 20 && !nextLine.match(/^\d+[\.\s]/)) {
-                sectionText += ' ' + nextLine;
-              } else {
+              
+              // Stop if we hit another section header
+              if (nextLine.match(/^\d+[\.\s]/) || nextLine.match(/^(?:section|article|clause|part|chapter)\s*\d+/i)) {
                 break;
+              }
+              
+              // Add meaningful content
+              if (nextLine.length > 10) {
+                sectionText += ' ' + nextLine;
+                contentLines++;
               }
             }
             
             sections.push({
               number: sectionNumber,
-              content: sectionText.substring(0, 300) // Limit content length
+              content: sectionText // No length limit - keep full content
             });
           }
         }
@@ -543,37 +559,125 @@ Make the language simple and accessible for non-lawyers.`;
     return uniqueSections.length > 0 ? uniqueSections : [];
   }
 
-  // Function to create bullet point summary
+  // Function to create sentence summary (no bullet points)
   function createBulletPointSummary(text, documentType) {
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    // Clean the text first
+    let cleanText = text.replace(/\s+/g, ' ').trim();
     
-    // Extract key points and convert to bullet format
-    const keyPoints = [];
+    // Split into sentences more carefully
+    const sentences = cleanText.split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20 && s.length < 300)
+      .slice(0, 8); // Limit to first 8 sentences
+    
+    if (sentences.length === 0) {
+      return "This section contains important terms and conditions that require careful review.";
+    }
+    
+    // Extract the most important information
+    const importantInfo = [];
     
     sentences.forEach(sentence => {
-      const trimmed = sentence.trim();
-      if (trimmed.length > 15) {
-        // Extract the most important part of the sentence
-        const words = trimmed.split(' ');
-        if (words.length > 6) {
-          // Take first 6 words and add ellipsis
-          keyPoints.push(words.slice(0, 6).join(' ') + '...');
-        } else {
-          keyPoints.push(trimmed);
+      // Look for key terms and extract meaningful content
+      const keyTerms = ['payment', 'fee', 'cost', 'deadline', 'termination', 'liability', 
+                       'obligation', 'responsibility', 'privacy', 'data', 'service', 
+                       'agreement', 'contract', 'rights', 'restrictions', 'penalty'];
+      
+      const lowerSentence = sentence.toLowerCase();
+      const hasKeyTerm = keyTerms.some(term => lowerSentence.includes(term));
+      
+      if (hasKeyTerm && sentence.length > 30) {
+        // Clean up the sentence
+        let cleanSentence = sentence
+          .replace(/^[^a-zA-Z]*/, '') // Remove leading non-letters
+          .replace(/[^a-zA-Z]*$/, '') // Remove trailing non-letters
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim();
+        
+        if (cleanSentence.length > 20) {
+          importantInfo.push(cleanSentence);
         }
       }
     });
     
-    // Limit to 3 bullet points per section
-    const bullets = keyPoints.slice(0, 3).map(point => `• ${point}`);
-    
-    // If we have fewer than 3 bullets, try to create more from the text
-    if (bullets.length < 3) {
-      const additionalPoints = extractAdditionalPoints(text);
-      bullets.push(...additionalPoints.slice(0, 3 - bullets.length));
+    // If no key terms found, use the first few sentences
+    if (importantInfo.length === 0) {
+      importantInfo.push(...sentences.slice(0, 3).map(s => 
+        s.replace(/^[^a-zA-Z]*/, '').replace(/[^a-zA-Z]*$/, '').trim()
+      ).filter(s => s.length > 20));
     }
     
-    return bullets.join('<br>');
+    // Create two well-formed sentences
+    let sentence1 = "";
+    let sentence2 = "";
+    
+    if (importantInfo.length >= 2) {
+      // Take the first important point and make it a complete sentence
+      const firstPoint = importantInfo[0];
+      sentence1 = firstPoint.endsWith('.') ? firstPoint : firstPoint + '.';
+      
+      // Take the second important point and make it a complete sentence
+      const secondPoint = importantInfo[1];
+      sentence2 = secondPoint.endsWith('.') ? secondPoint : secondPoint + '.';
+    } else if (importantInfo.length === 1) {
+      // Use the one point we have
+      const point = importantInfo[0];
+      sentence1 = point.endsWith('.') ? point : point + '.';
+      sentence2 = "This section contains important terms that require careful consideration.";
+    } else {
+      // Fallback
+      sentence1 = "This section outlines key terms and conditions.";
+      sentence2 = "Please review all details carefully before proceeding.";
+    }
+    
+    // Ensure proper capitalization
+    sentence1 = sentence1.charAt(0).toUpperCase() + sentence1.slice(1);
+    sentence2 = sentence2.charAt(0).toUpperCase() + sentence2.slice(1);
+    
+    // Ensure sentences end with periods
+    if (!sentence1.endsWith('.')) sentence1 += '.';
+    if (!sentence2.endsWith('.')) sentence2 += '.';
+    
+    return sentence1 + ' ' + sentence2;
+  }
+
+  // Function to create concise bullet points
+  function createConciseBulletPoint(sentence, documentType) {
+    // Clean up the sentence first
+    let cleanedSentence = sentence.trim();
+    
+    // Remove extra whitespace and clean up punctuation
+    cleanedSentence = cleanedSentence.replace(/\s+/g, ' ');
+    cleanedSentence = cleanedSentence.replace(/^[^a-zA-Z]*/, '').replace(/[^a-zA-Z]*$/, '');
+    
+    // For very long sentences, try to extract the most important part
+    if (cleanedSentence.length > 200) {
+      // Look for key phrases and extract around them
+      const keyPhrases = ['payment', 'fee', 'cost', 'rent', 'deposit', 'termination', 
+                         'liability', 'privacy', 'data', 'service', 'user', 'agreement',
+                         'obligation', 'responsibility', 'deadline', 'penalty', 'refund'];
+      
+      for (const phrase of keyPhrases) {
+        const phraseIndex = cleanedSentence.toLowerCase().indexOf(phrase);
+        if (phraseIndex !== -1) {
+          // Extract more context around the key phrase
+          const start = Math.max(0, phraseIndex - 50);
+          const end = Math.min(cleanedSentence.length, phraseIndex + phrase.length + 50);
+          const context = cleanedSentence.substring(start, end).trim();
+          
+          // Clean up the context
+          return context.replace(/^[^a-zA-Z]*/, '').replace(/[^a-zA-Z]*$/, '');
+        }
+      }
+      
+      // If no key phrase found, take the first meaningful part but make it longer
+      const words = cleanedSentence.split(' ');
+      if (words.length > 15) {
+        return words.slice(0, 15).join(' ');
+      }
+    }
+    
+    return cleanedSentence;
   }
   
   // Function to extract additional key points
@@ -592,7 +696,9 @@ Make the language simple and accessible for non-lawyers.`;
       if (matches && matches.length > 0) {
         const match = matches[0].trim();
         if (match.length > 10 && match.length < 50) {
-          points.push(`• ${match}...`);
+          // Clean up the match and make it concise
+          const cleanMatch = match.replace(/^[^a-zA-Z]*/, '').replace(/[^a-zA-Z]*$/, '');
+          points.push(cleanMatch);
         }
       }
     });
@@ -732,12 +838,19 @@ Make the language simple and accessible for non-lawyers.`;
 
   // Function to process red flags
   function processRedFlags(redFlags, documentType) {
-    return redFlags.map(flag => ({
+    const processedFlags = redFlags.map(flag => ({
       term: flag.term,
       context: flag.context,
       severity: getSeverity(flag.term, documentType),
-      description: getRedFlagDescription(flag.term)
+      description: getRedFlagDescription(flag.term),
+      suggestion: getRedFlagSuggestion(flag.term, flag.context, documentType)
     }));
+    
+    // Sort by severity: high first, then medium, then low
+    return processedFlags.sort((a, b) => {
+      const severityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+      return severityOrder[b.severity] - severityOrder[a.severity];
+    });
   }
 
   // Function to get severity level
@@ -766,29 +879,265 @@ Make the language simple and accessible for non-lawyers.`;
     return descriptions[term] || 'Important clause requiring attention';
   }
 
+  // Function to get red flag suggestion
+  function getRedFlagSuggestion(term, context, documentType) {
+    const suggestions = {
+      'due date': '⚠️ Set calendar reminders and ensure you meet this deadline to avoid penalties.',
+      'deadline': '⚠️ Mark this date in your calendar and prepare necessary actions in advance.',
+      'expiration': '⚠️ Track this expiration date closely to avoid automatic renewals or penalties.',
+      'penalty': '💰 This could result in financial loss. Consider negotiating or avoiding this clause.',
+      'fee': '💰 Additional costs may apply. Budget for these expenses or negotiate removal.',
+      'charge': '💰 You may be charged extra. Review if this is necessary for your needs.',
+      'cost': '💰 Financial implications exist. Ensure this aligns with your budget.',
+      'payment': '💰 Payment obligations exist. Understand the terms and amounts involved.',
+      'fine': '💰 Financial penalties possible. Consider the risk vs. benefit of this agreement.',
+      'liability': '⚖️ You may be held legally responsible. Consider liability insurance or negotiation.',
+      'responsibility': '⚖️ Legal obligations exist. Ensure you can fulfill these requirements.',
+      'obligation': '⚖️ You have binding duties. Make sure you can meet these commitments.',
+      'termination': '🚪 Understand how to end this agreement. Check notice requirements and penalties.',
+      'cancellation': '🚪 Review cancellation terms carefully. Some may have fees or restrictions.',
+      'automatic renewal': '🔄 Contract renews automatically. Set reminders to cancel if needed.',
+      'auto-renew': '🔄 Automatic renewal active. Monitor renewal dates to avoid unwanted charges.',
+      'subscription': '🔄 Recurring charges apply. Track billing cycles and cancellation policies.',
+      'recurring': '🔄 Ongoing charges exist. Monitor your account for unexpected fees.',
+      'restriction': '🚫 Limitations on your rights. Ensure these don\'t conflict with your needs.',
+      'limitation': '🚫 Your rights are limited. Consider if these restrictions are acceptable.',
+      'prohibition': '🚫 Certain actions are forbidden. Make sure you can comply.',
+      'exclusion': '🚫 Some protections are excluded. Consider additional coverage if needed.',
+      'privacy': '🔒 Your data usage is defined. Review what information is collected and shared.',
+      'data': '🔒 Personal information handling. Understand how your data is used and protected.',
+      'personal information': '🔒 Data collection terms. Ensure you\'re comfortable with data sharing.',
+      'arbitration': '⚖️ Disputes resolved through arbitration. You may lose right to court.',
+      'legal action': '⚖️ Legal proceedings possible. Understand your rights and potential costs.',
+      'litigation': '⚖️ Court proceedings may occur. Consider legal representation costs.',
+      'dispute resolution': '⚖️ Conflict resolution process. Understand your options and costs.',
+      'warranty': '📋 Service guarantees exist. Understand what\'s covered and excluded.',
+      'guarantee': '📋 Promises made by provider. Ensure these meet your expectations.',
+      'refund': '💸 Return policy defined. Understand refund conditions and timelines.',
+      'return': '💸 Return terms specified. Check if return conditions work for you.',
+      'modification': '📝 Agreement can be changed. Understand how changes are communicated.',
+      'amendment': '📝 Contract modifications possible. Monitor for changes that affect you.',
+      'change': '📝 Terms may be updated. Stay informed about modifications.',
+      'update': '📝 Agreement updates occur. Review changes to ensure they\'re acceptable.'
+    };
+    
+    // Try to find a specific suggestion for the term
+    const lowerTerm = term.toLowerCase();
+    for (const [key, suggestion] of Object.entries(suggestions)) {
+      if (lowerTerm.includes(key)) {
+        return suggestion;
+      }
+    }
+    
+    // Default suggestion based on severity
+    return '⚠️ This clause requires careful review. Consider consulting with a professional if unclear.';
+  }
+
   // Function to generate consent checklist
   function generateConsentChecklist(keyPoints, redFlags, documentType) {
     const checklist = [];
+    const usedTerms = new Set();
     
-    // Add key points as checklist items
-    keyPoints.forEach(point => {
-      checklist.push({
-        text: `I understand: ${point}`,
-        isRedFlag: false
-      });
+    // Add only high and medium severity red flags as checklist items (most important)
+    redFlags.forEach(flag => {
+      if (flag.severity === 'high' || flag.severity === 'medium') {
+        const conciseText = createConciseConsentText(flag.term, flag.severity);
+        if (!usedTerms.has(flag.term.toLowerCase())) {
+          checklist.push({
+            text: conciseText,
+            isRedFlag: true,
+            severity: flag.severity,
+            context: flag.context
+          });
+          usedTerms.add(flag.term.toLowerCase());
+        }
+      }
     });
     
-    // Add red flags as checklist items
-    redFlags.forEach(flag => {
+    // Add a few key points if we have space (limit to 3 most important)
+    const importantKeyPoints = keyPoints.slice(0, 3);
+    importantKeyPoints.forEach(point => {
+      const concisePoint = createConciseKeyPointText(point);
       checklist.push({
-        text: `I acknowledge: ${flag.description}`,
-        isRedFlag: true,
-        context: flag.context
+        text: concisePoint,
+        isRedFlag: false
       });
     });
     
     return checklist;
   }
+
+  // Function to create concise consent text for red flags
+  function createConciseConsentText(term, severity) {
+    const conciseTexts = {
+      'due date': 'I understand the deadline requirements and the consequences of missing them',
+      'deadline': 'I understand the deadline requirements and the consequences of missing them',
+      'expiration': 'I understand the expiration terms and what happens when they expire',
+      'penalty': 'I acknowledge potential penalties and financial consequences for non-compliance',
+      'fee': 'I understand additional fees may apply and will be charged to my account',
+      'charge': 'I acknowledge potential charges that may be applied to my payment method',
+      'cost': 'I understand the cost implications and total financial commitment required',
+      'payment': 'I understand payment obligations and the consequences of late or missed payments',
+      'fine': 'I acknowledge potential fines and penalties for violating the agreement terms',
+      'liability': 'I understand liability implications and my legal responsibility for damages',
+      'responsibility': 'I acknowledge my responsibilities and obligations under this agreement',
+      'obligation': 'I understand my obligations and the legal consequences of not fulfilling them',
+      'termination': 'I understand termination terms and the process for ending this agreement',
+      'cancellation': 'I understand cancellation policies and any fees associated with cancellation',
+      'automatic renewal': 'I understand automatic renewal terms and how to prevent unwanted renewals',
+      'auto-renew': 'I understand automatic renewal terms and how to prevent unwanted renewals',
+      'subscription': 'I understand subscription terms and recurring billing cycles',
+      'recurring': 'I understand recurring charges and how they will be processed',
+      'restriction': 'I understand usage restrictions and limitations on my rights',
+      'limitation': 'I understand limitations on my rights and available remedies',
+      'prohibition': 'I understand prohibited actions and the consequences of violating them',
+      'exclusion': 'I understand exclusions and what is not covered by this agreement',
+      'privacy': 'I understand privacy terms and how my personal information will be used',
+      'data': 'I understand data handling practices and how my information is processed',
+      'personal information': 'I understand data collection practices and third-party sharing policies',
+      'arbitration': 'I understand arbitration terms and that I may lose the right to court proceedings',
+      'legal action': 'I understand legal implications and potential court proceedings',
+      'litigation': 'I understand litigation terms and the costs associated with legal disputes',
+      'dispute resolution': 'I understand dispute resolution processes and available options',
+      'warranty': 'I understand warranty terms and what is covered or excluded',
+      'guarantee': 'I understand guarantee terms and the limitations of service promises',
+      'refund': 'I understand refund policies and the conditions for receiving money back',
+      'return': 'I understand return terms and any fees or conditions for returns',
+      'modification': 'I understand modification rights and how changes will be communicated',
+      'amendment': 'I understand amendment terms and how the agreement can be changed',
+      'change': 'I understand change policies and notification requirements for updates',
+      'update': 'I understand update terms and how modifications will be implemented'
+    };
+    
+    const lowerTerm = term.toLowerCase();
+    for (const [key, text] of Object.entries(conciseTexts)) {
+      if (lowerTerm.includes(key)) {
+        return text;
+      }
+    }
+    
+    return `I understand the ${term} terms and their implications`;
+  }
+
+  // Function to create concise key point text
+  function createConciseKeyPointText(point) {
+    // Extract the most important part of the key point
+    const words = point.split(' ');
+    if (words.length > 8) {
+      return `I understand: ${words.slice(0, 8).join(' ')}`;
+    }
+    return `I understand: ${point}`;
+  }
+
+  // Function to calculate contract binding/ethical rating (1-10)
+  function calculateContractRating(text, redFlags, documentType) {
+    let score = 10; // Start with perfect score
+    const lowerText = text.toLowerCase();
+    
+    // High severity red flags (major deductions)
+    const highSeverityTerms = [
+      'automatic renewal', 'auto-renew', 'binding arbitration', 'class action waiver',
+      'liquidated damages', 'penalty clause', 'excessive late fees', 'unilateral modification',
+      'data selling', 'third party sharing', 'no refund', 'no cancellation',
+      'forced arbitration', 'waiver of rights', 'indemnification', 'hold harmless'
+    ];
+    
+    // Medium severity red flags (moderate deductions)
+    const mediumSeverityTerms = [
+      'liability limitation', 'disclaimer of warranty', 'limited liability',
+      'termination fees', 'cancellation fees', 'modification rights',
+      'privacy policy changes', 'terms changes', 'service interruption',
+      'data collection', 'tracking', 'cookies', 'personal information'
+    ];
+    
+    // Low severity red flags (minor deductions)
+    const lowSeverityTerms = [
+      'terms of service', 'user agreement', 'acceptable use', 'prohibited use',
+      'account suspension', 'content removal', 'service availability',
+      'technical support', 'maintenance', 'updates'
+    ];
+    
+    // Check for high severity issues
+    highSeverityTerms.forEach(term => {
+      if (lowerText.includes(term)) {
+        score -= 2; // Major deduction
+      }
+    });
+    
+    // Check for medium severity issues
+    mediumSeverityTerms.forEach(term => {
+      if (lowerText.includes(term)) {
+        score -= 1; // Moderate deduction
+      }
+    });
+    
+    // Check for low severity issues
+    lowSeverityTerms.forEach(term => {
+      if (lowerText.includes(term)) {
+        score -= 0.5; // Minor deduction
+      }
+    });
+    
+    // Additional factors
+    const redFlagCount = redFlags.length;
+    if (redFlagCount > 10) score -= 1;
+    if (redFlagCount > 20) score -= 1;
+    
+    // Check for positive indicators
+    const positiveTerms = [
+      'refund policy', 'cancellation rights', 'privacy protection',
+      'data security', 'user rights', 'dispute resolution',
+      'customer service', 'transparent pricing', 'fair use'
+    ];
+    
+    positiveTerms.forEach(term => {
+      if (lowerText.includes(term)) {
+        score += 0.5; // Small bonus
+      }
+    });
+    
+    // Ensure score is between 1 and 10
+    score = Math.max(1, Math.min(10, score));
+    
+    // Round to nearest 0.5
+    score = Math.round(score * 2) / 2;
+    
+    return {
+      score: score,
+      description: getRatingDescription(score),
+      color: getRatingColor(score)
+    };
+  }
+
+  // Function to get rating description
+  function getRatingDescription(score) {
+    if (score >= 9) return 'Excellent - Very fair and transparent';
+    if (score >= 8) return 'Very Good - Generally fair terms';
+    if (score >= 7) return 'Good - Mostly reasonable terms';
+    if (score >= 6) return 'Fair - Some concerns but acceptable';
+    if (score >= 5) return 'Average - Mixed terms, proceed with caution';
+    if (score >= 4) return 'Below Average - Several concerning terms';
+    if (score >= 3) return 'Poor - Many problematic clauses';
+    if (score >= 2) return 'Very Poor - Highly restrictive terms';
+    return 'Extremely Poor - Avoid if possible';
+  }
+
+  // Function to get rating color
+  function getRatingColor(score) {
+    if (score >= 8) return '#2ed573'; // Green
+    if (score >= 6) return '#ffa502'; // Orange
+    if (score >= 4) return '#ff6348'; // Red-orange
+    return '#ff4757'; // Red
+  }
+
+
+  // Function to display contract rating on main page
+  function displayContractRating(contractRating) {
+    ratingScoreMain.textContent = `${contractRating.score}/10`;
+    ratingScoreMain.style.color = contractRating.color;
+    ratingDescriptionMain.textContent = contractRating.description;
+  }
+
 
   // Function to display results
   function displayResults(analysis) {
@@ -799,24 +1148,35 @@ Make the language simple and accessible for non-lawyers.`;
       '<div class="source-indicator openai">🤖 Powered by OpenAI GPT-4</div>' : 
       '<div class="source-indicator local">⚡ Local Analysis</div>';
     
-    // Display summary with source and sections
+    // Display contract rating on main page
+    displayContractRating(analysis.contractRating);
+    
+    // Display summary with source and sections (excluding sections 8 and 9)
     const summaryHtml = sourceIndicator + 
-      analysis.summary.map(section => 
-        `<div class="summary-section-item">
-          <h4>
-            Section ${section.number}
-            <a href="#" class="section-link" data-section="${section.number}">
-              Jump to Section
-            </a>
-          </h4>
-          <div class="section-content">${section.content}</div>
-        </div>`
-      ).join('');
+      analysis.summary
+        .filter(section => section.number !== 8 && section.number !== 9)
+        .map(section => 
+          `<div class="summary-section-item">
+            <h4 class="section-header collapsible-header" data-target="section-${section.number}-content">
+              Section ${section.number}
+              <span class="collapse-icon">▼</span>
+              <a href="#" class="section-link" data-section="${section.number}" onclick="event.stopPropagation();">
+                Jump to Section
+              </a>
+            </h4>
+            <div id="section-${section.number}-content" class="section-content collapsible-content collapsed">
+              ${section.content}
+            </div>
+          </div>`
+        ).join('');
     
     document.getElementById('summary').innerHTML = summaryHtml;
     
     // Add event listeners for section links
     addSectionLinkListeners();
+    
+    // Add event listeners for collapsible section headers
+    addSectionHeaderListeners();
     
     // Display key points
     const keyPointsHtml = analysis.keyPoints.map(point => 
@@ -825,38 +1185,19 @@ Make the language simple and accessible for non-lawyers.`;
     document.getElementById('keyPoints').innerHTML = keyPointsHtml;
     
     // Display red flags with severity indicators
-    const redFlagsHtml = analysis.redFlags.map(flag => 
+    const redFlagsHtml = analysis.redFlags.map((flag, index) => 
       `<div class="red-flag-item ${flag.severity}-severity">
         <div class="severity-indicator ${flag.severity}">${flag.severity.toUpperCase()}</div>
         <div class="flag-content">
           <strong>${flag.term}</strong><br>
           <small>${flag.description}</small><br>
+          <div class="suggestion">${flag.suggestion}</div>
           <em>Context: "${flag.context.substring(0, 100)}..."</em>
         </div>
       </div>`
     ).join('');
     document.getElementById('redFlags').innerHTML = redFlagsHtml;
     
-    // Display sections if available (for longer documents)
-    if (analysis.sections && analysis.sections.length > 0) {
-      const sectionsHtml = `
-        <div class="sections-section">
-          <h3>📑 Document Sections</h3>
-          <div class="sections-content">
-            ${analysis.sections.map((section, index) => 
-              `<div class="section-item">
-                <h4>Section ${index + 1}: ${section.title}</h4>
-                <p>${section.content.substring(0, 200)}...</p>
-              </div>`
-            ).join('')}
-          </div>
-        </div>
-      `;
-      
-      // Insert sections before consent section
-      const consentSection = document.querySelector('.consent-section');
-      consentSection.insertAdjacentHTML('beforebegin', sectionsHtml);
-    }
     
     // Display consent checklist
     const checklistHtml = analysis.consentChecklist.map((item, index) => 
@@ -870,6 +1211,7 @@ Make the language simple and accessible for non-lawyers.`;
     // Add submit button event listener
     document.getElementById('submitConsent').addEventListener('click', submitConsent);
     
+    
     results.style.display = 'block';
   }
 
@@ -880,6 +1222,10 @@ Make the language simple and accessible for non-lawyers.`;
     
     if (checkedBoxes.length === checkboxes.length) {
       alert('✅ Consent submitted successfully! You have acknowledged all key points and red flags.');
+      // Close the extension after successful consent submission
+      setTimeout(() => {
+        window.close();
+      }, 1000); // Wait 1 second to allow user to see the confirmation
     } else {
       alert('⚠️ Please review and check all items before submitting consent.');
     }

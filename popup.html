@@ -17,6 +17,11 @@
         <span class="status-indicator" id="statusIndicator">🟢</span>
         <span id="statusText">OpenAI GPT-4 analysis enabled</span>
       </div>
+      <div id="contractRating" class="contract-rating-main">
+        <div class="rating-label">Contract Rating</div>
+        <div class="rating-score-main" id="ratingScoreMain">0/10</div>
+        <div class="rating-description-main" id="ratingDescriptionMain">Please analyze a document to see rating</div>
+      </div>
     </div>
 
     <div class="reading-options">
@@ -34,17 +39,9 @@
           <span class="icon">📋</span>
           Read Copied Text
         </button>
-        <button id="readFile" class="option-btn">
-          <span class="icon">📁</span>
-          Upload File
-        </button>
       </div>
     </div>
 
-    <div id="fileInputContainer" class="file-input-container" style="display: none;">
-      <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx">
-      <button id="analyzeFile" class="analyze-btn">Analyze File</button>
-    </div>
 
     <div id="loading" class="loading" style="display: none;">
       <div class="spinner"></div>
@@ -67,9 +64,14 @@
         <div id="keyPoints" class="key-points-content"></div>
       </div>
 
-      <div class="red-flags-section">
-        <h3>🚨 Red Flags & Important Details</h3>
-        <div id="redFlags" class="red-flags-content"></div>
+      <div class="red-flags-section collapsible">
+        <h3 class="collapsible-header" data-target="redFlagsContent">
+          🚨 Red Flags & Important Details
+          <span class="collapse-icon">▼</span>
+        </h3>
+        <div id="redFlagsContent" class="collapsible-content collapsed">
+          <div id="redFlags" class="red-flags-content"></div>
+        </div>
       </div>
 
       <div class="consent-section">
@@ -82,6 +84,7 @@
     <div id="error" class="error" style="display: none;">
       <p id="errorMessage"></p>
     </div>
+
   </div>
 
   <script src="config.js"></script>
