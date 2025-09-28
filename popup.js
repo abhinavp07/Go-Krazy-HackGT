@@ -847,10 +847,18 @@ Make the language simple and accessible for non-lawyers.`;
     }));
     
     // Sort by severity: high first, then medium, then low
-    return processedFlags.sort((a, b) => {
+    const sortedFlags = processedFlags.sort((a, b) => {
       const severityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
       return severityOrder[b.severity] - severityOrder[a.severity];
     });
+    
+    // Limit to 3 flags per severity level
+    const highFlags = sortedFlags.filter(flag => flag.severity === 'high').slice(0, 3);
+    const mediumFlags = sortedFlags.filter(flag => flag.severity === 'medium').slice(0, 3);
+    const lowFlags = sortedFlags.filter(flag => flag.severity === 'low').slice(0, 3);
+    
+    // Combine and return the limited flags
+    return [...highFlags, ...mediumFlags, ...lowFlags];
   }
 
   // Function to get severity level
