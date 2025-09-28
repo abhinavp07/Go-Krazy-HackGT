@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "SignSmarter",
+  "version": "1.0",
+  "description": "Read and summarize documents with key points and red flags for easy understanding",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SignSmarter",
+    "default_icon": {
+      "16": "icons/SignSmart logo (1).png",
+      "32": "icons/SignSmart logo (1).png",
+      "48": "icons/SignSmart logo (1).png",
+      "128": "icons/SignSmart logo (1).png"
+    }
+  },
+  "icons": {
+    "16": "icons/SignSmart logo (1).png",
+    "32": "icons/SignSmart logo (1).png",
+    "48": "icons/SignSmart logo (1).png",
+    "128": "icons/SignSmart logo (1).png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "popup.js", "popup.css", "config.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

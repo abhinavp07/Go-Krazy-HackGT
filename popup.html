@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>SignSmarter</h1>
+      <p>Smart document analysis and summarization</p>
+    </header>
+    
+    <div class="api-config">
+      <h3>🤖 AI Analysis</h3>
+      <div class="api-status" id="apiStatus">
+        <span class="status-indicator" id="statusIndicator">🟢</span>
+        <span id="statusText">OpenAI GPT-4 analysis enabled</span>
+      </div>
+    </div>
+
+    <div class="reading-options">
+      <h3>Choose Reading Method:</h3>
+      <div class="option-buttons">
+        <button id="readPage" class="option-btn">
+          <span class="icon">📄</span>
+          Read Current Page
+        </button>
+        <button id="readSelected" class="option-btn">
+          <span class="icon">✂️</span>
+          Read Selected Text
+        </button>
+        <button id="readCopied" class="option-btn">
+          <span class="icon">📋</span>
+          Read Copied Text
+        </button>
+        <button id="readFile" class="option-btn">
+          <span class="icon">📁</span>
+          Upload File
+        </button>
+      </div>
+    </div>
+
+    <div id="fileInputContainer" class="file-input-container" style="display: none;">
+      <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx">
+      <button id="analyzeFile" class="analyze-btn">Analyze File</button>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      <p>Analyzing document...</p>
+    </div>
+
+    <div id="results" class="results" style="display: none;">
+      <div class="summary-section collapsible">
+        <h3 class="collapsible-header" data-target="summaryContent">
+          📋 Document Summary
+          <span class="collapse-icon">▼</span>
+        </h3>
+        <div id="summaryContent" class="collapsible-content collapsed">
+          <div id="summary" class="summary-content"></div>
+        </div>
+      </div>
+
+      <div class="key-points-section">
+        <h3>✅ Key Points to Review</h3>
+        <div id="keyPoints" class="key-points-content"></div>
+      </div>
+
+      <div class="red-flags-section">
+        <h3>🚨 Red Flags & Important Details</h3>
+        <div id="redFlags" class="red-flags-content"></div>
+      </div>
+
+      <div class="consent-section">
+        <h3>📝 Consent Checklist</h3>
+        <div id="consentChecklist" class="consent-checklist"></div>
+        <button id="submitConsent" class="submit-btn">Submit Consent</button>
+      </div>
+    </div>
+
+    <div id="error" class="error" style="display: none;">
+      <p id="errorMessage"></p>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
